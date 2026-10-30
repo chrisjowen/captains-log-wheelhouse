@@ -19,11 +19,9 @@
  * @typedef {import('../ui/digest.js').Digest} Digest
  */
 
-import { MAX_LOOKBACK_HOURS, lines, morningBefore, readSettings } from '../ui/digest.js';
+import { MAX_ITEMS, MAX_LOOKBACK_HOURS, lines, readSettings, windowStart } from '../ui/digest.js';
 
 const HOUR = 3600 * 1000;
-/** At most this many of each kind of item go to the page; the counts stay whole. */
-const MAX_ITEMS = 50;
 const TROUBLE = new Set(['blocked', 'failed', 'lost', 'unknown']);
 const FINISHED = new Set(['landed']);
 
@@ -41,11 +39,11 @@ export function httpsUrl(v) {
 	}
 }
 
-/** When a task landed, as epoch ms: the exact merge time, else the end of the day it was done. */
+/** When a task landed, as epoch ms: the exact merge time, else the start of the day it was done. */
 export function landedAt(t) {
 	const merged = str(t.mergedAt) ? Date.parse(t.mergedAt) : NaN;
 	if (!Number.isNaN(merged)) return { at: merged, exact: true };
-	const day = str(t.completedOn) ? Date.parse(`${t.completedOn}T23:59:59`) : NaN;
+	const day = str(t.completedOn) ? Date.parse(`${t.completedOn}T00:00:00`) : NaN;
 	return Number.isNaN(day) ? null : { at: day, exact: false };
 }
 
@@ -69,7 +67,8 @@ export function waitingKind(t) {
  * The digest's data from the fleet: plain JSON, with task titles as written in
  * the backlog (the drill-in shows them as text), each task's own page as a
  * same-origin link, and pull requests only as https links. Landed work goes
- * back a week, so the page can show it by day; the card narrows it.
+ * back a week, whole, so the page can show it by day; the card narrows it.
+ * The other lists stop at MAX_ITEMS; their counts stay whole.
  *
  * @param {{ tasks: unknown[]; projects: unknown[]; settings: unknown; now: number }} o
  * @returns {Digest}
@@ -82,7 +81,13 @@ export function buildDigest({ tasks, projects, settings, now }) {
 	const waiting = [];
 	const underway = [];
 	const next = [];
-	const counts = { underway: 0, withFirstmate: 0, withReviewers: 0, queued: 0 };
+	const counts = {
+		underway: 0,
+		withFirstmate: 0,
+		withReviewers: 0,
+		queued: 0,
+		waiting: { decision: 0, review: 0, merge: 0 }
+	};
 	for (const t of tasks) {
 		if (!isRecord(t) || !str(t.id)) continue;
 		const base = {
@@ -93,6 +98,7 @@ export function buildDigest({ tasks, projects, settings, now }) {
 		const pr = httpsUrl(isRecord(t.pr) ? t.pr.url : null);
 		const kind = waitingKind(t);
 		if (kind) {
+			counts.waiting[kind]++;
 			waiting.push({ ...base, pr, kind });
 		} else if (t.status === 'queued') {
 			counts.queued++;
@@ -126,7 +132,7 @@ export function buildDigest({ tasks, projects, settings, now }) {
 		generatedAt: new Date(now).toISOString(),
 		settings: chosen,
 		problems,
-		landed: landed.slice(0, MAX_ITEMS),
+		landed,
 		waiting: waiting.slice(0, MAX_ITEMS),
 		underway: underway.slice(0, MAX_ITEMS),
 		next: next.slice(0, MAX_ITEMS),
@@ -135,15 +141,16 @@ export function buildDigest({ tasks, projects, settings, now }) {
 }
 
 /**
- * The rail tab's count: what landed since the morning start, when that is the
- * window. Since the last visit, only the browser knows the window, so no count.
+ * The rail tab's count: what the card says landed, when the window is the
+ * morning one (from the morning start, no further back than the look-back
+ * limit). Since the last visit, only the browser knows the window, so no count.
  *
  * @param {Digest} d
  */
 export function badge(d) {
 	if (!isRecord(d) || !isRecord(d.settings) || d.settings.window !== 'morning') return null;
 	const now = Date.parse(d.generatedAt);
-	const n = lines(d, morningBefore(now, d.settings.morningStart)).landed.items.length;
+	const n = lines(d, windowStart(d.settings, now, null).start).landed.items.length;
 	return n > 0 ? n : null;
 }
 

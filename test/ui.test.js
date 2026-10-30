@@ -143,6 +143,23 @@ describe('<captains-log-digest>', () => {
 		expect(text(e)).toContain('“dawn” is not a time like 07:00');
 	});
 
+	it('counts everything in its lines, while each list shows at most 50', () => {
+		const tasks = [];
+		for (let i = 0; i < 60; i++) {
+			tasks.push(
+				task(`pr${i}`, 'needs-review', {
+					attention: { kind: 'review', owner: 'captain', text: '', url: null }
+				}),
+				task(`l${i}`, 'landed', { mergedAt: new Date(NOW - (i + 1) * 60_000).toISOString() })
+			);
+		}
+		const e = mount('captains-log-digest', fleet(tasks));
+		expect(summaries(e)[0]).toMatch(/^60 changes landed:/);
+		expect(summaries(e)[1]).toBe('60 things wait on you: 60 pull requests to review.');
+		const lists = [...e.shadowRoot.querySelectorAll('ul')].map((u) => u.children.length);
+		expect(lists.slice(0, 2)).toEqual([50, 50]);
+	});
+
 	it('draws nothing for a value it does not know', () => {
 		const e = mount('captains-log-digest', { schema: 'something-else' });
 		expect(e.shadowRoot.childNodes).toHaveLength(0);
@@ -167,6 +184,19 @@ describe('<captains-log-page>', () => {
 		expect(days[1]).toContain('A quiet day: nothing landed.');
 		expect(days[2]).toContain('Task b landed.');
 		expect(days[2]).toContain('landed Thursday');
+	});
+
+	it('shows what landed earlier in the week, not only the newest 50 changes', () => {
+		const tasks = Array.from({ length: 60 }, (_, i) =>
+			task(`l${i}`, 'landed', {
+				mergedAt: new Date(NOW - (i < 55 ? i + 1 : 5 * 24) * HOUR).toISOString()
+			})
+		);
+		const e = mount('captains-log-page', fleet(tasks));
+		const days = [...e.shadowRoot.querySelectorAll('.day')].map((d) =>
+			d.textContent.replace(/\s+/g, ' ').trim()
+		);
+		expect(days[5]).toContain('5 changes landed');
 	});
 });
 

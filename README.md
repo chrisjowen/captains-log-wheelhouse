@@ -38,7 +38,9 @@ The settings are stored as `window` (`last-visit` or `morning`), `morningStart` 
 
 **"Since you were last here"** is this browser's own record, kept in its local storage while the log is on screen. Coming back after more than half an hour away starts a new visit, so the digest covers what happened while you were gone. A different browser, or one with its storage cleared, starts from the morning start until it has a visit of its own.
 
-The **Log** tab shows a count of what landed since the morning start when the digest covers the morning, and no count when it covers your last visit, since only the browser knows when that was.
+The **Log** tab shows a count of what landed when the digest covers the morning: the same count the card's first line gives, since the morning start and no further back than the look-back setting. It shows no count when the digest covers your last visit, since only the browser knows when that was.
+
+Work with only a day it was done (no exact merge time) counts from the start of that day, so it shows as new once and sorts below that day's merges.
 
 Only "what landed" depends on this window. What waits on you and what is under way are always as they are now.
 

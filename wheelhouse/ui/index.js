@@ -17,6 +17,7 @@
 
 import {
 	DEFAULTS,
+	MAX_ITEMS,
 	VISIT_GAP_MS,
 	byDay,
 	dayLabel,
@@ -170,7 +171,7 @@ function item(i, words) {
 function list(items, words, empty) {
 	if (!items.length) return el('p', 'empty', empty);
 	const ul = el('ul');
-	for (const i of items) ul.append(item(i, words(i)));
+	for (const i of items.slice(0, MAX_ITEMS)) ul.append(item(i, words(i)));
 	return ul;
 }
 

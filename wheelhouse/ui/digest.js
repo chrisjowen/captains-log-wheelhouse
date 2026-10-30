@@ -14,7 +14,9 @@
  * @typedef {{ window: 'last-visit' | 'morning'; morningStart: string; lookbackHours: number }} Settings
  * @typedef {{ schema: 'captains-log.v1'; generatedAt: string; settings: Settings; problems: string[];
  *   landed: LandedItem[]; waiting: WaitingItem[]; underway: UnderwayItem[]; next: NextItem[];
- *   counts: { underway: number; withFirstmate: number; withReviewers: number; queued: number } }} Digest
+ *   counts: { underway: number; withFirstmate: number; withReviewers: number; queued: number;
+ *     waiting: WaitingCounts } }} Digest
+ * @typedef {{ decision: number; review: number; merge: number }} WaitingCounts
  */
 
 export const WINDOWS = ['last-visit', 'morning'];
@@ -24,6 +26,8 @@ export const DEFAULTS = { window: 'last-visit', morningStart: '07:00', lookbackH
 export const MAX_LOOKBACK_HOURS = 168;
 /** Away this long, and the next look is a new visit. */
 export const VISIT_GAP_MS = 30 * 60 * 1000;
+/** A drill-in list shows at most this many items; its sentence counts them all. */
+export const MAX_ITEMS = 50;
 
 const HOUR = 3600 * 1000;
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -145,7 +149,7 @@ export function lines(d, start) {
 	const landed = d.landed.filter((i) => i.at !== null && Date.parse(i.at) >= start);
 	return {
 		landed: { sentence: landedSentence(landed), items: landed },
-		waiting: { sentence: waitingSentence(d.waiting), items: d.waiting },
+		waiting: { sentence: waitingSentence(d.counts.waiting), items: d.waiting },
 		ahead: { sentence: aheadSentence(d), items: [...d.underway, ...d.next] }
 	};
 }
@@ -160,15 +164,14 @@ export function landedSentence(items) {
 	return `${n} changes landed: ${t[0]}, ${t[1]} and ${n - 2} more.`;
 }
 
-/** @param {WaitingItem[]} items */
-export function waitingSentence(items) {
-	const n = items.length;
+/** @param {WaitingCounts} c */
+export function waitingSentence(c) {
+	const n = c.decision + c.review + c.merge;
 	if (n === 0) return 'Nothing is waiting on you.';
-	const by = (k) => items.filter((i) => i.kind === k).length;
 	const parts = [
-		plural(by('decision'), 'a decision', 'decisions'),
-		plural(by('review'), 'a pull request to review', 'pull requests to review'),
-		plural(by('merge'), 'a pull request to merge', 'pull requests to merge')
+		plural(c.decision, 'a decision', 'decisions'),
+		plural(c.review, 'a pull request to review', 'pull requests to review'),
+		plural(c.merge, 'a pull request to merge', 'pull requests to merge')
 	].filter(Boolean);
 	return `${n} ${n === 1 ? 'thing waits' : 'things wait'} on you: ${join(parts)}.`;
 }

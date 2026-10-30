@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import plugin, { badge, buildDigest, httpsUrl, waitingKind } from '../wheelhouse/server/index.js';
+import { lines } from '../wheelhouse/ui/digest.js';
 
 const now = Date.parse('2026-10-31T09:00:00Z');
 const projects = [
@@ -71,14 +72,20 @@ describe('buildDigest', () => {
 			['Task busy', 'crew']
 		]);
 		expect(d.underway[3].project).toBe('Lumen');
-		expect(d.counts).toEqual({ underway: 4, withFirstmate: 2, withReviewers: 1, queued: 2 });
+		expect(d.counts).toEqual({
+			underway: 4,
+			withFirstmate: 2,
+			withReviewers: 1,
+			queued: 2,
+			waiting: { decision: 1, review: 1, merge: 1 }
+		});
 		expect(d.next.map((i) => [i.title, i.turn])).toEqual([
 			['Task soon', true],
 			['Task later', false]
 		]);
 		expect(d.landed.map((i) => [i.title, i.at, i.exact])).toEqual([
 			['Task merged', '2026-10-31T02:14:00.000Z', true],
-			['Task done', '2026-10-30T23:59:59.000Z', false]
+			['Task done', '2026-10-30T00:00:00.000Z', false]
 		]);
 		expect(d.landed[0]).toMatchObject({ project: 'Atlas', href: '/tasks/merged' });
 	});
@@ -116,6 +123,41 @@ describe('buildDigest', () => {
 		expect(d.underway.map((i) => i.title)).toEqual(['A task with no title']);
 	});
 
+	it('keeps every landed task of the week and whole waiting counts, capping only the lists', () => {
+		const tasks = [];
+		for (let i = 0; i < 60; i++) {
+			tasks.push(
+				task(`pr${i}`, 'needs-review', {
+					attention: { kind: 'review', owner: 'captain', text: '', url: null }
+				})
+			);
+			tasks.push(
+				task(`l${i}`, 'landed', { mergedAt: new Date(now - (i + 1) * 3600 * 1000).toISOString() })
+			);
+		}
+		const d = digest(tasks);
+		expect(d.waiting).toHaveLength(50);
+		expect(d.counts.waiting).toEqual({ decision: 0, review: 60, merge: 0 });
+		expect(d.landed).toHaveLength(60);
+		const l = lines(d, now - 72 * 3600 * 1000);
+		expect(l.waiting.sentence).toBe('60 things wait on you: 60 pull requests to review.');
+		expect(l.landed.sentence).toMatch(/^60 changes landed:/);
+	});
+
+	it('puts work done on a day with no merge time at the start of that day, below its merges', () => {
+		const d = digest([
+			task('day', 'landed', { completedOn: '2026-10-31' }),
+			task('merged', 'landed', { mergedAt: '2026-10-31T01:00:00Z' })
+		]);
+		expect(d.landed.map((i) => i.title)).toEqual(['Task merged', 'Task day']);
+		// Looked at 07:00 this morning: what was done today before then is not new again at 09:00.
+		const later = lines(d, Date.parse('2026-10-31T07:00:00Z'));
+		expect(later.landed.items).toEqual([]);
+		// Last here yesterday evening: it is new once.
+		const first = lines(d, Date.parse('2026-10-30T20:00:00Z'));
+		expect(first.landed.items.map((i) => i.title)).toEqual(['Task merged', 'Task day']);
+	});
+
 	it('carries the settings it used, and any it could not', () => {
 		const d = digest([], { window: 'morning', morningStart: 'dawn' });
 		expect(d.settings).toEqual({ window: 'morning', morningStart: '07:00', lookbackHours: 72 });
@@ -132,6 +174,24 @@ describe('badge', () => {
 	it('counts what landed since the morning start, in the morning window', () => {
 		expect(badge(digest(landed, { window: 'morning' }))).toBe(1);
 		expect(badge(digest([], { window: 'morning' }))).toBeNull();
+	});
+
+	it('counts no further back than the look-back setting, as the card does', () => {
+		const d = digest(
+			[
+				task('recent', 'landed', { mergedAt: '2026-10-31T08:30:00Z' }),
+				task('early', 'landed', { mergedAt: '2026-10-31T07:30:00Z' })
+			],
+			{ window: 'morning', morningStart: '07:00', lookbackHours: 1 }
+		);
+		expect(badge(d)).toBe(1);
+	});
+
+	it('counts every landed task, not only those a list shows', () => {
+		const tasks = Array.from({ length: 60 }, (_, i) =>
+			task(`l${i}`, 'landed', { mergedAt: new Date(now - (i + 1) * 60_000).toISOString() })
+		);
+		expect(badge(digest(tasks, { window: 'morning' }))).toBe(60);
 	});
 
 	it('has no count since the last visit, which only the browser knows', () => {

@@ -125,18 +125,10 @@ describe('the three sentences', () => {
 	});
 
 	it('says what waits on the captain, by kind', () => {
-		expect(waitingSentence([])).toBe('Nothing is waiting on you.');
-		expect(waitingSentence([item('A', { kind: 'decision' })])).toBe(
-			'1 thing waits on you: a decision.'
-		);
-		expect(
-			waitingSentence([
-				item('A', { kind: 'decision' }),
-				item('B', { kind: 'decision' }),
-				item('C', { kind: 'review' }),
-				item('D', { kind: 'merge' })
-			])
-		).toBe(
+		const c = (counts) => ({ decision: 0, review: 0, merge: 0, ...counts });
+		expect(waitingSentence(c({}))).toBe('Nothing is waiting on you.');
+		expect(waitingSentence(c({ decision: 1 }))).toBe('1 thing waits on you: a decision.');
+		expect(waitingSentence(c({ decision: 2, review: 1, merge: 1 }))).toBe(
 			'4 things wait on you: 2 decisions, a pull request to review and a pull request to merge.'
 		);
 	});
@@ -167,7 +159,13 @@ describe('the three sentences', () => {
 			waiting: [],
 			underway: [],
 			next: [],
-			counts: { underway: 0, withFirstmate: 0, withReviewers: 0, queued: 0 }
+			counts: {
+				underway: 0,
+				withFirstmate: 0,
+				withReviewers: 0,
+				queued: 0,
+				waiting: { decision: 0, review: 0, merge: 0 }
+			}
 		};
 		const l = lines(d, at('2026-10-31T00:00:00Z'));
 		expect(l.landed.items.map((i) => i.title)).toEqual(['New']);
