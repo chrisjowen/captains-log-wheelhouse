@@ -1,0 +1,183 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import plugin, { badge, buildDigest, httpsUrl, waitingKind } from '../wheelhouse/server/index.js';
+
+const now = Date.parse('2026-10-31T09:00:00Z');
+const projects = [
+	{ id: 'atlas', name: 'Atlas', description: null, path: null },
+	{ id: 'lumen', name: 'Lumen', description: null, path: null }
+];
+
+/** A task as Wheelhouse hands it to plugins (the SDK's fields, plus attention). */
+function task(id, status, extra = {}) {
+	return {
+		id,
+		title: `${extra.projectId ?? 'atlas'}: Task ${id}`,
+		shortTitle: `Task ${id}`,
+		projectId: 'atlas',
+		kind: 'ship',
+		status,
+		statusLabel: status[0].toUpperCase() + status.slice(1),
+		branch: null,
+		pr: null,
+		preview: null,
+		since: null,
+		completedOn: null,
+		mergedAt: null,
+		...extra
+	};
+}
+
+const digest = (tasks, settings = {}) => buildDigest({ tasks, projects, settings, now });
+
+describe('buildDigest', () => {
+	it('sorts the fleet the way the rail does', () => {
+		const d = digest([
+			task('decide', 'needs-decision', {
+				attention: { kind: 'decision', owner: 'captain', text: 'Pick one', url: null }
+			}),
+			task('review', 'needs-review', {
+				pr: { url: 'https://github.com/o/r/pull/9', number: 9 },
+				attention: { kind: 'review', owner: 'captain', text: 'PR 9', url: null }
+			}),
+			task('approved', 'needs-review', {
+				attention: { kind: 'review', owner: 'captain', approved: true, text: '', url: null }
+			}),
+			task('others', 'with-reviewers', {
+				attention: { kind: 'review', owner: 'reviewers', text: '', url: null }
+			}),
+			task('fm', 'with-firstmate'),
+			task('stuck', 'blocked'),
+			task('busy', 'working', { projectId: 'lumen' }),
+			task('later', 'queued', { blockedBy: ['busy'] }),
+			task('soon', 'queued', { blockedBy: [] }),
+			task('merged', 'landed', {
+				mergedAt: '2026-10-31T02:14:00Z',
+				pr: { url: 'https://github.com/o/r/pull/7', number: 7 }
+			}),
+			task('done', 'landed', { completedOn: '2026-10-30' }),
+			task('ancient', 'landed', { mergedAt: '2026-10-01T00:00:00Z' })
+		]);
+		expect(d.waiting.map((i) => [i.title, i.kind])).toEqual([
+			['Task decide', 'decision'],
+			['Task review', 'review'],
+			['Task approved', 'merge']
+		]);
+		expect(d.waiting[1].pr).toBe('https://github.com/o/r/pull/9');
+		expect(d.underway.map((i) => [i.title, i.who])).toEqual([
+			['Task others', 'reviewers'],
+			['Task fm', 'firstmate'],
+			['Task stuck', 'firstmate'],
+			['Task busy', 'crew']
+		]);
+		expect(d.underway[3].project).toBe('Lumen');
+		expect(d.counts).toEqual({ underway: 4, withFirstmate: 2, withReviewers: 1, queued: 2 });
+		expect(d.next.map((i) => [i.title, i.turn])).toEqual([
+			['Task soon', true],
+			['Task later', false]
+		]);
+		expect(d.landed.map((i) => [i.title, i.at, i.exact])).toEqual([
+			['Task merged', '2026-10-31T02:14:00.000Z', true],
+			['Task done', '2026-10-30T23:59:59.000Z', false]
+		]);
+		expect(d.landed[0]).toMatchObject({ project: 'Atlas', href: '/tasks/merged' });
+	});
+
+	it('links each task to its own page, escaping its id', () => {
+		const d = digest([task('a/b?c', 'working')]);
+		expect(d.underway[0].href).toBe('/tasks/a%2Fb%3Fc');
+	});
+
+	it('shows pull requests only as https links', () => {
+		expect(httpsUrl('https://github.com/o/r/pull/1')).toBe('https://github.com/o/r/pull/1');
+		expect(httpsUrl('javascript:alert(1)')).toBeNull();
+		expect(httpsUrl('http://example.test/pull/1')).toBeNull();
+		expect(httpsUrl('not a url')).toBeNull();
+		const d = digest([
+			task('x', 'landed', { mergedAt: '2026-10-31T01:00:00Z', pr: { url: 'javascript:alert(1)' } })
+		]);
+		expect(d.landed[0].pr).toBeNull();
+	});
+
+	it('falls back on the status when Wheelhouse passes no attention', () => {
+		expect(waitingKind({ status: 'needs-review' })).toBe('review');
+		expect(waitingKind({ status: 'needs-decision' })).toBe('decision');
+		expect(waitingKind({ status: 'working' })).toBeNull();
+		expect(waitingKind({ status: 'needs-review', attention: { owner: 'firstmate' } })).toBeNull();
+	});
+
+	it('skips rows it cannot read, and names untitled tasks', () => {
+		const d = digest([
+			null,
+			'x',
+			{ status: 'working' },
+			task('t', 'working', { shortTitle: '', title: '' })
+		]);
+		expect(d.underway.map((i) => i.title)).toEqual(['A task with no title']);
+	});
+
+	it('carries the settings it used, and any it could not', () => {
+		const d = digest([], { window: 'morning', morningStart: 'dawn' });
+		expect(d.settings).toEqual({ window: 'morning', morningStart: '07:00', lookbackHours: 72 });
+		expect(d.problems).toHaveLength(1);
+	});
+});
+
+describe('badge', () => {
+	const landed = [
+		task('a', 'landed', { mergedAt: '2026-10-31T08:00:00Z' }),
+		task('b', 'landed', { mergedAt: '2026-10-31T06:00:00Z' })
+	];
+
+	it('counts what landed since the morning start, in the morning window', () => {
+		expect(badge(digest(landed, { window: 'morning' }))).toBe(1);
+		expect(badge(digest([], { window: 'morning' }))).toBeNull();
+	});
+
+	it('has no count since the last visit, which only the browser knows', () => {
+		expect(badge(digest(landed))).toBeNull();
+		expect(badge(null)).toBeNull();
+	});
+});
+
+describe('the plugin', () => {
+	const manifest = JSON.parse(readFileSync('.wheelhouse-plugin/plugin.json', 'utf8'));
+
+	it('contributes exactly what its manifest declares', () => {
+		expect(plugin.contributions.map((c) => ({ id: c.id, slot: c.slot }))).toEqual(
+			manifest.wheelhouse.contributions
+		);
+		expect(plugin.services ?? []).toEqual(manifest.wheelhouse.services);
+	});
+
+	it('draws each entry with one of its own elements, from its own providers', () => {
+		const ids = new Set(plugin.providers.map((p) => p.id));
+		for (const c of plugin.contributions) {
+			expect(ids.has(c.provider)).toBe(true);
+			expect(c.render.element.startsWith(`${manifest.name}-`)).toBe(true);
+		}
+	});
+
+	it('reads only the fleet and its settings', async () => {
+		const forbidden = () => {
+			throw new Error('the digest reads nothing else');
+		};
+		const ctx = {
+			project: null,
+			task: null,
+			projects,
+			tasks: [task('busy', 'working')],
+			settings: {},
+			signal: new AbortController().signal,
+			exec: forbidden,
+			readFile: forbidden,
+			listDir: forbidden,
+			changedFiles: forbidden
+		};
+		const r = await plugin.providers[0].fetch(ctx);
+		expect(r.available).toBe(true);
+		expect(r.value.schema).toBe('captains-log.v1');
+		expect(r.value.underway).toHaveLength(1);
+		expect(JSON.parse(JSON.stringify(r.value))).toEqual(r.value);
+	});
+});
