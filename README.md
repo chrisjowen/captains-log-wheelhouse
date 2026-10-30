@@ -40,13 +40,13 @@ The settings are stored as `window` (`last-visit` or `morning`), `morningStart` 
 
 The **Log** tab shows a count of what landed when the digest covers the morning: the same count the card's first line gives, since the morning start and no further back than the look-back setting. It shows no count when the digest covers your last visit, since only the browser knows when that was.
 
-Work with only a day it was done (no exact merge time) counts from the start of that day, so it shows as new once and sorts below that day's merges.
+Work with no merge time counts from when Firstmate's fleet ledger says it was done (shown as "done 14:05"), so it shows as new once. With no such record, it counts from the start of the day it was done, and sorts below that day's other work.
 
 Only "what landed" depends on this window. What waits on you and what is under way are always as they are now.
 
 ## What it reads
 
-Only the fleet Wheelhouse hands every plugin (tasks and projects, which Wheelhouse reads from Firstmate's records: the backlog, status, fleet ledger and pull request state) and its own settings. It runs no commands, reads no files and writes nothing. Like every plugin, it cannot message Firstmate or ring the ship's bell.
+The fleet Wheelhouse hands every plugin (tasks and projects, which Wheelhouse reads from Firstmate's records: the backlog, status, fleet ledger and pull request state) and its own settings. When a landed task has only the day it was done, it also reads Firstmate's fleet ledger (`state/fleet-ledger.jsonl` in the Firstmate home) for when it was done, with one bounded, read-only `grep` for the task status and clean-up lines. If the ledger is missing or cannot be read, that work counts from the start of its day. It writes nothing. Like every plugin, it cannot message Firstmate or ring the ship's bell.
 
 It sorts tasks the way Wheelhouse's own rail does, so its counts agree with the Under way, Needs you and Landed tabs.
 

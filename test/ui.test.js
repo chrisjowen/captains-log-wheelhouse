@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildDigest } from '../wheelhouse/server/index.js';
+import { badge, buildDigest } from '../wheelhouse/server/index.js';
 
 const NOW = Date.parse('2026-10-31T09:00:00Z');
 const HOUR = 3600 * 1000;
@@ -158,6 +158,41 @@ describe('<captains-log-digest>', () => {
 		expect(summaries(e)[1]).toBe('60 things wait on you: 60 pull requests to review.');
 		const lists = [...e.shadowRoot.querySelectorAll('ul')].map((u) => u.children.length);
 		expect(lists.slice(0, 2)).toEqual([50, 50]);
+	});
+
+	it('lists the next task even with more than a list holds under way', () => {
+		const tasks = Array.from({ length: 60 }, (_, i) => task(`w${i}`, 'working'));
+		tasks.push(task('soon', 'queued'));
+		const e = mount('captains-log-digest', fleet(tasks));
+		const ahead = [...e.shadowRoot.querySelectorAll('ul')].at(-1);
+		expect(ahead.children).toHaveLength(51);
+		expect(ahead.lastElementChild.textContent).toContain('Task soon');
+	});
+
+	it('agrees with the badge when the look back is shorter than the time since the morning start', () => {
+		const d = fleet(
+			[
+				task('recent', 'landed', { mergedAt: '2026-10-31T08:30:00Z' }),
+				task('early', 'landed', { mergedAt: '2026-10-31T07:30:00Z' })
+			],
+			{ window: 'morning', morningStart: '07:00', lookbackHours: 1 }
+		);
+		const e = mount('captains-log-digest', d);
+		expect(text(e)).toContain('In the last hour');
+		expect(summaries(e)[0]).toBe('Task recent landed.');
+		expect(badge(d)).toBe(1);
+	});
+
+	it('says when work with no merge time was done, from the ledger', () => {
+		const d = buildDigest({
+			tasks: [task('a', 'landed', { completedOn: '2026-10-31' })],
+			projects,
+			settings: {},
+			now: NOW,
+			done: new Map([['a', Date.parse('2026-10-31T08:05:00Z')]])
+		});
+		const e = mount('captains-log-digest', d);
+		expect(text(e)).toContain('done 08:05');
 	});
 
 	it('draws nothing for a value it does not know', () => {

@@ -5,7 +5,7 @@
  * browser element share it, and the tests run it under Node.
  *
  * @typedef {{ title: string; project: string | null; href: string | null; pr: string | null;
- *   at: string | null; exact: boolean }} LandedItem
+ *   at: string | null; time: 'merged' | 'done' | 'day' }} LandedItem
  * @typedef {{ title: string; project: string | null; href: string | null; pr: string | null;
  *   kind: 'decision' | 'review' | 'merge' }} WaitingItem
  * @typedef {{ title: string; project: string | null; href: string | null; state: string;

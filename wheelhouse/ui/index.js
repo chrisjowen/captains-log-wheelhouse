@@ -140,14 +140,15 @@ function link(href, text, external) {
 const clock = (ms) =>
 	new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
 
-/** When an item landed, in a few words: the time today, else the day (and time, when exact). */
+/** When an item landed, in a few words: the time today, else the day (and time, when known). */
 function landedWords(item, now) {
 	const at = Date.parse(item.at);
 	const day = dayLabel(at, now);
-	if (!item.exact)
-		return `landed ${day === 'Today' || day === 'Yesterday' ? day.toLowerCase() : day}`;
-	if (day === 'Today') return `merged ${clock(at)}`;
-	return `merged ${day === 'Yesterday' ? 'yesterday' : day} ${clock(at)}`;
+	const when = day === 'Today' || day === 'Yesterday' ? day.toLowerCase() : day;
+	if (item.time === 'day') return `landed ${when}`;
+	const verb = item.time === 'done' ? 'done' : 'merged';
+	if (day === 'Today') return `${verb} ${clock(at)}`;
+	return `${verb} ${when} ${clock(at)}`;
 }
 
 const WAITING_WORDS = {
@@ -171,9 +172,13 @@ function item(i, words) {
 function list(items, words, empty) {
 	if (!items.length) return el('p', 'empty', empty);
 	const ul = el('ul');
-	for (const i of items.slice(0, MAX_ITEMS)) ul.append(item(i, words(i)));
+	for (const i of items) ul.append(item(i, words(i)));
 	return ul;
 }
+
+/** Landed work, which comes whole for the week: the list shows the newest MAX_ITEMS. */
+const landedList = (items, now, empty) =>
+	list(items.slice(0, MAX_ITEMS), (i) => landedWords(i, now), empty);
 
 /** The three lines, as <details> that open to their lists, keeping which are open in `open`. */
 function threeLines(d, start, now, open) {
@@ -183,7 +188,7 @@ function threeLines(d, start, now, open) {
 			key: 'landed',
 			icon: 'check',
 			sentence: l.landed.sentence,
-			body: list(l.landed.items, (i) => landedWords(i, now), 'Nothing landed in this window.')
+			body: landedList(l.landed.items, now, 'Nothing landed in this window.')
 		},
 		{
 			key: 'waiting',
@@ -342,7 +347,7 @@ class CaptainsLogPage extends Base {
 			body.append(
 				el('p', '', day.items.length ? landedSentence(day.items) : 'A quiet day: nothing landed.')
 			);
-			if (day.items.length) body.append(list(day.items, (i) => landedWords(i, now), ''));
+			if (day.items.length) body.append(landedList(day.items, now, ''));
 			row.append(when, body);
 			page.append(row);
 		}

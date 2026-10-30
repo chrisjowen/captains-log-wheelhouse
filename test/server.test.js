@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import plugin, { badge, buildDigest, httpsUrl, waitingKind } from '../wheelhouse/server/index.js';
-import { lines } from '../wheelhouse/ui/digest.js';
+import plugin, {
+	LEDGER_GREP,
+	badge,
+	buildDigest,
+	httpsUrl,
+	waitingKind
+} from '../wheelhouse/server/index.js';
+import { lines, windowStart } from '../wheelhouse/ui/digest.js';
 
 const now = Date.parse('2026-10-31T09:00:00Z');
 const projects = [
@@ -83,9 +89,9 @@ describe('buildDigest', () => {
 			['Task soon', true],
 			['Task later', false]
 		]);
-		expect(d.landed.map((i) => [i.title, i.at, i.exact])).toEqual([
-			['Task merged', '2026-10-31T02:14:00.000Z', true],
-			['Task done', '2026-10-30T00:00:00.000Z', false]
+		expect(d.landed.map((i) => [i.title, i.at, i.time])).toEqual([
+			['Task merged', '2026-10-31T02:14:00.000Z', 'merged'],
+			['Task done', '2026-10-30T00:00:00.000Z', 'day']
 		]);
 		expect(d.landed[0]).toMatchObject({ project: 'Atlas', href: '/tasks/merged' });
 	});
@@ -218,26 +224,144 @@ describe('the plugin', () => {
 		}
 	});
 
-	it('reads only the fleet and its settings', async () => {
-		const forbidden = () => {
-			throw new Error('the digest reads nothing else');
-		};
-		const ctx = {
-			project: null,
-			task: null,
-			projects,
-			tasks: [task('busy', 'working')],
-			settings: {},
-			signal: new AbortController().signal,
-			exec: forbidden,
-			readFile: forbidden,
-			listDir: forbidden,
-			changedFiles: forbidden
-		};
-		const r = await plugin.providers[0].fetch(ctx);
+	it('reads only the fleet and its settings when no landed work lacks a merge time', async () => {
+		const { r, calls } = await fetchWith(
+			[task('busy', 'working'), task('m', 'landed', { mergedAt: '2026-10-31T08:00:00Z' })],
+			forbidden
+		);
+		expect(calls).toEqual([]);
 		expect(r.available).toBe(true);
 		expect(r.value.schema).toBe('captains-log.v1');
 		expect(r.value.underway).toHaveLength(1);
 		expect(JSON.parse(JSON.stringify(r.value))).toEqual(r.value);
+	});
+
+	it('reads the fleet ledger with one bounded grep when landed work has only a day', async () => {
+		const { calls } = await fetchWith(
+			[
+				task('a', 'landed', { completedOn: '2026-10-31' }),
+				task('b', 'landed', { completedOn: '2026-10-30' })
+			],
+			ok('')
+		);
+		expect(calls).toEqual([
+			{
+				argv: [
+					'grep',
+					'-F',
+					'-e',
+					'"task.status"',
+					'-e',
+					'"task.cleaned_up"',
+					'state/fleet-ledger.jsonl'
+				],
+				cwd: 'home',
+				timeoutMs: 3_000,
+				maxBytes: 4 * 1024 * 1024
+			}
+		]);
+		expect(calls[0]).toEqual(LEDGER_GREP);
+	});
+});
+
+const sec = (iso) => Date.parse(iso) / 1000;
+const ledger = (...records) =>
+	records.map((r) => (typeof r === 'string' ? r : JSON.stringify(r))).join('\n');
+const ok = (stdout) => async () => ({ ok: true, stdout });
+const forbidden = () => {
+	throw new Error('the digest reads nothing else');
+};
+
+/** Run the provider as Wheelhouse does, recording each exec it makes. */
+async function fetchWith(tasks, exec, settings = {}) {
+	const calls = [];
+	const ctx = {
+		project: null,
+		task: null,
+		projects,
+		tasks,
+		settings,
+		signal: new AbortController().signal,
+		exec: async (c) => {
+			calls.push(c);
+			return exec(c);
+		},
+		readFile: forbidden,
+		listDir: forbidden,
+		changedFiles: forbidden
+	};
+	return { r: await plugin.providers[0].fetch(ctx), calls };
+}
+
+describe('work done on a day with no merge time', () => {
+	const done = task('day', 'landed', { completedOn: '2026-10-31' });
+	const records = ledger(
+		{ v: 1, ts: sec('2026-10-31T08:00:00Z'), event: 'task.status', task: 'day', state: 'working' },
+		{ v: 1, ts: sec('2026-10-30T22:00:00Z'), event: 'task.status', task: 'day', state: 'done' },
+		{ v: 1, ts: sec('2026-10-31T08:40:00Z'), event: 'task.cleaned_up', task: 'day' },
+		{ v: 1, ts: sec('2026-10-31T08:20:00Z'), event: 'task.status', task: 'day', state: 'done' },
+		{ v: 1, ts: sec('2026-10-31T07:00:00Z'), event: 'task.merged', task: 'day' },
+		{ v: 1, ts: sec('2026-10-31T07:30:00Z'), event: 'task.status', task: 'other', state: 'done' },
+		'{not json',
+		''
+	);
+
+	it('lands when the ledger first says it was done that day', async () => {
+		const { r } = await fetchWith([done], ok(records));
+		expect(r.value.landed.map((i) => [i.title, i.at, i.time])).toEqual([
+			['Task day', '2026-10-31T08:20:00.000Z', 'done']
+		]);
+	});
+
+	it('is new once: on the visit after it was done, and not on the next', async () => {
+		const { r } = await fetchWith([done], ok(records));
+		const before = Date.parse('2026-10-31T08:00:00Z');
+		const after = Date.parse('2026-10-31T08:50:00Z');
+		expect(lines(r.value, before).landed.items.map((i) => i.title)).toEqual(['Task day']);
+		expect(lines(r.value, after).landed.items).toEqual([]);
+	});
+
+	it('shows in the morning window, and the badge, when done after the morning start', async () => {
+		const { r } = await fetchWith([done], ok(records), {
+			window: 'morning',
+			morningStart: '08:00'
+		});
+		const w = windowStart(r.value.settings, now, null);
+		expect(lines(r.value, w.start).landed.sentence).toBe('Task day landed.');
+		expect(badge(r.value)).toBe(1);
+	});
+
+	it('sorts below same-day work with a real time when the ledger has no record', async () => {
+		const { r } = await fetchWith(
+			[done, task('m', 'landed', { mergedAt: '2026-10-31T00:30:00Z' })],
+			ok('')
+		);
+		expect(r.value.landed.map((i) => [i.title, i.at, i.time])).toEqual([
+			['Task m', '2026-10-31T00:30:00.000Z', 'merged'],
+			['Task day', '2026-10-31T00:00:00.000Z', 'day']
+		]);
+	});
+
+	it.each([
+		[
+			'missing',
+			async () => ({ ok: false, reason: 'exited with code 2', stdout: '', stderr: 'No such file' })
+		],
+		[
+			'without matches',
+			async () => ({ ok: false, reason: 'exited with code 1', stdout: '', stderr: '' })
+		],
+		[
+			'unreadable',
+			async () => {
+				throw new Error('refused');
+			}
+		]
+	])('counts from the start of its day when the ledger is %s', async (_, exec) => {
+		const { r } = await fetchWith([done], exec);
+		expect(r.available).toBe(true);
+		expect(r.value.landed.map((i) => [i.at, i.time])).toEqual([
+			['2026-10-31T00:00:00.000Z', 'day']
+		]);
 	});
 });

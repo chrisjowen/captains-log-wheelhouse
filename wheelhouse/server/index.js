@@ -3,9 +3,10 @@
  * the captain was last here (or since the morning start), what waits on the
  * captain, and what is under way and next; plus a page with the last week.
  *
- * It reads only the fleet Wheelhouse hands every provider (`ctx.tasks`,
- * `ctx.projects`) and its own settings. It runs nothing, reads no files and
- * writes nothing. Both entries are drawn by the custom elements in
+ * It reads the fleet Wheelhouse hands every provider (`ctx.tasks`,
+ * `ctx.projects`), its own settings and, when a landed task has only the day it
+ * was done, Firstmate's fleet ledger with one bounded grep, for when it was
+ * done. It writes nothing. Both entries are drawn by the custom elements in
  * ../ui/index.js, which work out the window and the sentences in the browser
  * (the "last here" time is the browser's own), with ../ui/digest.js.
  *
@@ -25,6 +26,15 @@ const HOUR = 3600 * 1000;
 const TROUBLE = new Set(['blocked', 'failed', 'lost', 'unknown']);
 const FINISHED = new Set(['landed']);
 
+/** Firstmate's fleet ledger, in the Firstmate home (contract: Firstmate docs/fleet-ledger.md). */
+const LEDGER = 'state/fleet-ledger.jsonl';
+export const LEDGER_GREP = {
+	argv: ['grep', '-F', '-e', '"task.status"', '-e', '"task.cleaned_up"', LEDGER],
+	cwd: 'home',
+	timeoutMs: 3_000,
+	maxBytes: 4 * 1024 * 1024
+};
+
 const isRecord = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
 
@@ -39,12 +49,77 @@ export function httpsUrl(v) {
 	}
 }
 
-/** When a task landed, as epoch ms: the exact merge time, else the start of the day it was done. */
-export function landedAt(t) {
-	const merged = str(t.mergedAt) ? Date.parse(t.mergedAt) : NaN;
-	if (!Number.isNaN(merged)) return { at: merged, exact: true };
+const mergedAt = (t) => (str(t.mergedAt) ? Date.parse(t.mergedAt) : NaN);
+
+/** A landed task with only the day it was done: no merge time to go by. */
+const dayOnly = (t) =>
+	isRecord(t) && FINISHED.has(t.status) && Number.isNaN(mergedAt(t)) && str(t.completedOn) !== null;
+
+/** The local day of an epoch-ms time, as `YYYY-MM-DD`. */
+function localDay(ms) {
+	const d = new Date(ms);
+	const pad = (n) => String(n).padStart(2, '0');
+	return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * When each task with only a done day was done, as epoch ms, from the fleet
+ * ledger's lines: the earliest `done` status or clean-up on that day.
+ *
+ * @param {string} text the ledger's task.status and task.cleaned_up lines
+ * @param {Map<string, string>} days task id to its `completedOn`
+ * @returns {Map<string, number>}
+ */
+export function doneTimes(text, days) {
+	const out = new Map();
+	for (const line of text.split('\n')) {
+		let r;
+		try {
+			r = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (!isRecord(r) || typeof r.ts !== 'number' || !days.has(r.task)) continue;
+		const done = (r.event === 'task.status' && r.state === 'done') || r.event === 'task.cleaned_up';
+		const at = r.ts * 1000;
+		if (!done || localDay(at) !== days.get(r.task)) continue;
+		if (!out.has(r.task) || at < out.get(r.task)) out.set(r.task, at);
+	}
+	return out;
+}
+
+/**
+ * Read the done times for the fleet's day-only landed tasks; none to read, or a
+ * ledger that is missing or unreadable, gives none.
+ *
+ * @param {ProviderContext} ctx
+ */
+export async function readDoneTimes(ctx) {
+	const days = new Map(ctx.tasks.filter(dayOnly).map((t) => [t.id, str(t.completedOn)]));
+	if (days.size === 0) return new Map();
+	let r;
+	try {
+		r = await ctx.exec(LEDGER_GREP);
+	} catch {
+		return new Map();
+	}
+	// grep exits 1 when nothing matches, which is an answer.
+	const ok = r.ok || (r.reason === 'exited with code 1' && !r.stderr);
+	return ok ? doneTimes(r.stdout, days) : new Map();
+}
+
+/**
+ * When a task landed, as epoch ms, and how that is known: the merge time, else
+ * when the ledger says it was done, else the start of the day it was done.
+ *
+ * @param {Map<string, number>} [done] from readDoneTimes
+ */
+export function landedAt(t, done = new Map()) {
+	const merged = mergedAt(t);
+	if (!Number.isNaN(merged)) return { at: merged, time: 'merged' };
+	if (done.has(t.id)) return { at: done.get(t.id), time: 'done' };
 	const day = str(t.completedOn) ? Date.parse(`${t.completedOn}T00:00:00`) : NaN;
-	return Number.isNaN(day) ? null : { at: day, exact: false };
+	return Number.isNaN(day) ? null : { at: day, time: 'day' };
 }
 
 /**
@@ -70,10 +145,11 @@ export function waitingKind(t) {
  * back a week, whole, so the page can show it by day; the card narrows it.
  * The other lists stop at MAX_ITEMS; their counts stay whole.
  *
- * @param {{ tasks: unknown[]; projects: unknown[]; settings: unknown; now: number }} o
+ * @param {{ tasks: unknown[]; projects: unknown[]; settings: unknown; now: number;
+ *   done?: Map<string, number> }} o
  * @returns {Digest}
  */
-export function buildDigest({ tasks, projects, settings, now }) {
+export function buildDigest({ tasks, projects, settings, now, done = new Map() }) {
 	const { problems, ...chosen } = readSettings(settings);
 	const names = new Map(projects.filter(isRecord).map((p) => [p.id, str(p.name) ?? null]));
 	const since = now - MAX_LOOKBACK_HOURS * HOUR;
@@ -105,9 +181,9 @@ export function buildDigest({ tasks, projects, settings, now }) {
 			const turn = !Array.isArray(t.blockedBy) || t.blockedBy.length === 0;
 			next.push({ ...base, turn });
 		} else if (FINISHED.has(t.status)) {
-			const when = landedAt(t);
+			const when = landedAt(t, done);
 			if (when && when.at >= since) {
-				landed.push({ ...base, pr, at: new Date(when.at).toISOString(), exact: when.exact });
+				landed.push({ ...base, pr, at: new Date(when.at).toISOString(), time: when.time });
 			}
 		} else {
 			counts.underway++;
@@ -167,7 +243,8 @@ export default {
 					tasks: ctx.tasks,
 					projects: ctx.projects,
 					settings: ctx.settings,
-					now: Date.now()
+					now: Date.now(),
+					done: await readDoneTimes(ctx)
 				});
 				return { available: true, value, source: 'the fleet', observedAt: value.generatedAt };
 			}
