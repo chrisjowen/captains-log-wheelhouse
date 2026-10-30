@@ -1,0 +1,44 @@
+{
+	"$schema": "https://raw.githubusercontent.com/chrisjowen/wheelhouse/main/packages/plugin-sdk/plugin.schema.json",
+	"name": "captains-log",
+	"displayName": "Captain's log",
+	"version": "0.1.0",
+	"description": "A short digest on the home page's rail: what landed since you were last here, what waits on you, and what is under way and next.",
+	"author": { "name": "Chris Owen", "url": "https://github.com/chrisjowen" },
+	"repository": "https://github.com/chrisjowen/captains-log-wheelhouse",
+	"license": "MIT",
+	"keywords": ["digest", "fleet"],
+	"wheelhouse": {
+		"apiVersion": 1,
+		"server": "wheelhouse/server/index.js",
+		"ui": "wheelhouse/ui/index.js",
+		"enabledByDefault": false,
+		"contributions": [
+			{ "id": "digest", "slot": "home.card" },
+			{ "id": "log", "slot": "nav.page" }
+		],
+		"services": [],
+		"settings": {
+			"window": {
+				"title": "What the digest covers",
+				"description": "Since you were last here is this browser's own record; until it has one, the digest starts at the morning start.",
+				"default": "last-visit",
+				"options": [
+					{ "value": "last-visit", "label": "Since I was last here" },
+					{ "value": "morning", "label": "Since my morning start each day" }
+				]
+			},
+			"morningStart": {
+				"title": "Morning start",
+				"description": "A 24-hour time, such as 07:00.",
+				"default": "07:00"
+			},
+			"lookbackHours": {
+				"title": "Look back at most (hours)",
+				"description": "After a long time away, the digest covers no more than this; at most 168 (a week).",
+				"type": "number",
+				"default": 72
+			}
+		}
+	}
+}

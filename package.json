@@ -1,0 +1,26 @@
+{
+	"name": "captains-log-wheelhouse",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Wheelhouse plugin: a Captain's log digest card - what landed, what waits on the captain, what is next.",
+	"license": "MIT",
+	"type": "module",
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"lint": "prettier --check . && eslint .",
+		"format": "prettier --write .",
+		"test": "TZ=UTC vitest run"
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"ajv": "^8.20.0",
+		"eslint": "^10.14.0",
+		"eslint-config-prettier": "^10.1.8",
+		"globals": "^17.13.0",
+		"happy-dom": "^21.0.4",
+		"prettier": "^3.9.10",
+		"vitest": "^5.0.5"
+	}
+}
