@@ -28,12 +28,28 @@ const FINISHED = new Set(['landed']);
 
 /** Firstmate's fleet ledger, in the Firstmate home (contract: Firstmate docs/fleet-ledger.md). */
 const LEDGER = 'state/fleet-ledger.jsonl';
-export const LEDGER_GREP = {
-	argv: ['grep', '-F', '-e', '"task.status"', '-e', '"task.cleaned_up"', LEDGER],
-	cwd: 'home',
-	timeoutMs: 3_000,
-	maxBytes: 4 * 1024 * 1024
-};
+/** At most this many tasks' done times are read at once, the most recently done first. */
+export const MAX_LEDGER_TASKS = 100;
+
+/**
+ * The bounded ledger read for these task ids: only their `done` status and
+ * clean-up lines, matched as the ledger writes them (compact, `event`, `task`,
+ * then `state`), so the output grows with these tasks, not the ledger.
+ *
+ * @param {string[]} ids
+ */
+export function ledgerGrep(ids) {
+	const patterns = ids.flatMap((id) => {
+		const task = `"task":${JSON.stringify(id)}`;
+		return ['-e', `${task},"state":"done"`, '-e', `"event":"task.cleaned_up",${task}`];
+	});
+	return {
+		argv: ['grep', '-F', ...patterns, LEDGER],
+		cwd: 'home',
+		timeoutMs: 3_000,
+		maxBytes: 4 * 1024 * 1024
+	};
+}
 
 const isRecord = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 const str = (v) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
@@ -89,17 +105,24 @@ export function doneTimes(text, days) {
 }
 
 /**
- * Read the done times for the fleet's day-only landed tasks; none to read, or a
- * ledger that is missing or unreadable, gives none.
+ * Read the done times for the fleet's day-only landed tasks that can still show
+ * (done within the week); none to read, or a ledger that is missing or
+ * unreadable, gives none.
  *
  * @param {ProviderContext} ctx
+ * @param {number} now epoch ms
  */
-export async function readDoneTimes(ctx) {
-	const days = new Map(ctx.tasks.filter(dayOnly).map((t) => [t.id, str(t.completedOn)]));
+export async function readDoneTimes(ctx, now) {
+	const first = localDay(now - MAX_LOOKBACK_HOURS * HOUR);
+	const recent = ctx.tasks
+		.filter((t) => dayOnly(t) && str(t.id) && str(t.completedOn) >= first)
+		.sort((a, b) => str(b.completedOn).localeCompare(str(a.completedOn)))
+		.slice(0, MAX_LEDGER_TASKS);
+	const days = new Map(recent.map((t) => [t.id, str(t.completedOn)]));
 	if (days.size === 0) return new Map();
 	let r;
 	try {
-		r = await ctx.exec(LEDGER_GREP);
+		r = await ctx.exec(ledgerGrep([...days.keys()]));
 	} catch {
 		return new Map();
 	}
@@ -239,12 +262,13 @@ export default {
 			ttlMs: 30_000,
 			/** @param {ProviderContext} ctx */
 			async fetch(ctx) {
+				const now = Date.now();
 				const value = buildDigest({
 					tasks: ctx.tasks,
 					projects: ctx.projects,
 					settings: ctx.settings,
-					now: Date.now(),
-					done: await readDoneTimes(ctx)
+					now,
+					done: await readDoneTimes(ctx, now)
 				});
 				return { available: true, value, source: 'the fleet', observedAt: value.generatedAt };
 			}

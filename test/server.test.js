@@ -1,7 +1,10 @@
-import { readFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import plugin, {
-	LEDGER_GREP,
+	MAX_LEDGER_TASKS,
 	badge,
 	buildDigest,
 	httpsUrl,
@@ -236,11 +239,13 @@ describe('the plugin', () => {
 		expect(JSON.parse(JSON.stringify(r.value))).toEqual(r.value);
 	});
 
-	it('reads the fleet ledger with one bounded grep when landed work has only a day', async () => {
+	it('reads the ledger once, for just the day-only tasks done this week', async () => {
 		const { calls } = await fetchWith(
 			[
 				task('a', 'landed', { completedOn: '2026-10-31' }),
-				task('b', 'landed', { completedOn: '2026-10-30' })
+				task('b', 'landed', { completedOn: '2026-10-30' }),
+				task('old', 'landed', { completedOn: '2026-10-20' }),
+				task('m', 'landed', { completedOn: '2026-10-31', mergedAt: '2026-10-31T08:00:00Z' })
 			],
 			ok('')
 		);
@@ -250,9 +255,13 @@ describe('the plugin', () => {
 					'grep',
 					'-F',
 					'-e',
-					'"task.status"',
+					'"task":"a","state":"done"',
 					'-e',
-					'"task.cleaned_up"',
+					'"event":"task.cleaned_up","task":"a"',
+					'-e',
+					'"task":"b","state":"done"',
+					'-e',
+					'"event":"task.cleaned_up","task":"b"',
 					'state/fleet-ledger.jsonl'
 				],
 				cwd: 'home',
@@ -260,7 +269,24 @@ describe('the plugin', () => {
 				maxBytes: 4 * 1024 * 1024
 			}
 		]);
-		expect(calls[0]).toEqual(LEDGER_GREP);
+	});
+
+	it('does not read the ledger for day-only work too old to show', async () => {
+		const { calls } = await fetchWith(
+			[task('old', 'landed', { completedOn: '2026-10-20' })],
+			forbidden
+		);
+		expect(calls).toEqual([]);
+	});
+
+	it('reads at most MAX_LEDGER_TASKS tasks, the most recently done', async () => {
+		const tasks = Array.from({ length: MAX_LEDGER_TASKS + 20 }, (_, i) =>
+			task(`t${i}`, 'landed', { completedOn: i < 20 ? '2026-10-25' : '2026-10-31' })
+		);
+		const { calls } = await fetchWith(tasks, ok(''));
+		const named = calls[0].argv.filter((a) => a.endsWith(',"state":"done"'));
+		expect(named).toHaveLength(MAX_LEDGER_TASKS);
+		expect(named.some((a) => /"t1?\d",/.test(a))).toBe(false);
 	});
 });
 
@@ -293,6 +319,27 @@ async function fetchWith(tasks, exec, settings = {}) {
 	return { r: await plugin.providers[0].fetch(ctx), calls };
 }
 
+/** Run each read for real: grep in a Firstmate home holding this ledger, capped as asked. */
+function realGrep(text) {
+	const home = mkdtempSync(join(tmpdir(), 'captains-log-'));
+	mkdirSync(join(home, 'state'));
+	writeFileSync(join(home, 'state/fleet-ledger.jsonl'), text);
+	return (c) =>
+		new Promise((resolve) => {
+			execFile(
+				c.argv[0],
+				c.argv.slice(1),
+				{ cwd: home, maxBuffer: c.maxBytes },
+				(err, stdout, stderr) =>
+					resolve(
+						err
+							? { ok: false, reason: `exited with code ${err.code}`, stdout, stderr }
+							: { ok: true, stdout }
+					)
+			);
+		});
+}
+
 describe('work done on a day with no merge time', () => {
 	const done = task('day', 'landed', { completedOn: '2026-10-31' });
 	const records = ledger(
@@ -305,6 +352,40 @@ describe('work done on a day with no merge time', () => {
 		'{not json',
 		''
 	);
+
+	it('gets its done time from a ledger far larger than one read may return', async () => {
+		const noise = [];
+		for (let i = 0; i < 40_000; i++) {
+			noise.push({
+				v: 1,
+				ts: sec('2026-10-31T06:00:00Z') + i,
+				event: 'task.status',
+				task: i % 2 ? 'busy' : 'day-two',
+				state: i % 3 ? 'working' : 'done',
+				key: null,
+				text: ' ' + 'x'.repeat(150)
+			});
+		}
+		const text = ledger(...noise, {
+			v: 1,
+			ts: sec('2026-10-31T08:20:00Z'),
+			event: 'task.status',
+			task: 'day',
+			state: 'done',
+			key: null,
+			text: ' ok'
+		});
+		expect(text.length).toBeGreaterThan(4 * 1024 * 1024);
+		const { r, calls } = await fetchWith([done], realGrep(text));
+		expect(calls).toHaveLength(1);
+		expect(calls[0].argv.filter((a) => a.includes('"task":'))).toEqual([
+			'"task":"day","state":"done"',
+			'"event":"task.cleaned_up","task":"day"'
+		]);
+		expect(r.value.landed.map((i) => [i.at, i.time])).toEqual([
+			['2026-10-31T08:20:00.000Z', 'done']
+		]);
+	});
 
 	it('lands when the ledger first says it was done that day', async () => {
 		const { r } = await fetchWith([done], ok(records));

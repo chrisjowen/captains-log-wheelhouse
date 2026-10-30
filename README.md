@@ -46,7 +46,7 @@ Only "what landed" depends on this window. What waits on you and what is under w
 
 ## What it reads
 
-The fleet Wheelhouse hands every plugin (tasks and projects, which Wheelhouse reads from Firstmate's records: the backlog, status, fleet ledger and pull request state) and its own settings. When a landed task has only the day it was done, it also reads Firstmate's fleet ledger (`state/fleet-ledger.jsonl` in the Firstmate home) for when it was done, with one bounded, read-only `grep` for the task status and clean-up lines. If the ledger is missing or cannot be read, that work counts from the start of its day. It writes nothing. Like every plugin, it cannot message Firstmate or ring the ship's bell.
+The fleet Wheelhouse hands every plugin (tasks and projects, which Wheelhouse reads from Firstmate's records: the backlog, status, fleet ledger and pull request state) and its own settings. When a landed task has only the day it was done, it also reads Firstmate's fleet ledger (`state/fleet-ledger.jsonl` in the Firstmate home) for when it was done, with one read-only `grep` for just those tasks' done and clean-up lines (the tasks done in the last week, at most 100 of them, newest first). If the ledger is missing or cannot be read, that work counts from the start of its day. It writes nothing. Like every plugin, it cannot message Firstmate or ring the ship's bell.
 
 It sorts tasks the way Wheelhouse's own rail does, so its counts agree with the Under way, Needs you and Landed tabs.
 
