@@ -8,7 +8,15 @@ A [Wheelhouse](https://github.com/chrisjowen/wheelhouse) plugin: a short digest 
 
 Each line opens to its list. **Whole log** leads to a **Captain's log** page in the left-hand menu: the same three lines, then what landed on each of the last seven days.
 
-<img src="docs/log-tab.png" alt="The Log tab on Wheelhouse's home rail: three lines, the first opened to the three changes that landed" width="456">
+![Wheelhouse's home page with the Log tab open on the rail: three lines saying what landed since the morning, what waits on you and what is under way](docs/images/home-log-tab.png)
+
+Open a line to see its tasks, with each task's project, when it landed or where it stands, and a link to its pull request:
+
+<img src="docs/images/log-tab-open.png" alt="The Log tab with all three lines open: the three changes that landed today with merge times, a decision and a pull request waiting on you, and two tasks under way followed by the next two in the backlog" width="454">
+
+The **Captain's log** page gives the same three lines, then what landed on each of the last seven days, newest first:
+
+![The Captain's log page: the three lines closed, then the last seven days, from today's three merged changes back to a quiet Monday](docs/images/log-page.png)
 
 <sub>Made-up projects.</sub>
 
@@ -27,6 +35,8 @@ The plugin is off until you turn it on. In **Settings → Plugins**, open **Capt
 ## Settings
 
 Change these on the plugin's page in **Settings → Plugins**. They apply without a restart.
+
+![The Captain's log page in Settings → Plugins: on for every project, with atlas, lumen and tidepool following the plugin, and the three settings below](docs/images/settings.png)
 
 | Setting                       | Default               | What it does                                                                                    |
 | ----------------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
