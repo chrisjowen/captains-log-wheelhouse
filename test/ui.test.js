@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { badge, buildDigest } from '../wheelhouse/server/index.js';
 
-const NOW = Date.parse('2026-10-31T09:00:00Z');
+import { NOW } from './now.js';
 const HOUR = 3600 * 1000;
 const projects = [{ id: 'atlas', name: 'Atlas', description: null, path: null }];
 
@@ -30,13 +30,9 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-	vi.useFakeTimers({ toFake: ['Date'] });
-	vi.setSystemTime(NOW);
 	localStorage.clear();
 	document.body.replaceChildren();
 });
-
-afterEach(() => vi.useRealTimers());
 
 /** Mount an element as Wheelhouse does: create it, add it, set its data. */
 function mount(tag, data) {

@@ -14,7 +14,7 @@ import {
 	windowStart
 } from '../wheelhouse/ui/digest.js';
 
-// The tests run with TZ=UTC (see package.json), so local times are UTC times.
+// The tests run with TZ=UTC (see vitest.config.js), so local times are UTC times.
 const at = (iso) => Date.parse(iso);
 const HOUR = 3600 * 1000;
 

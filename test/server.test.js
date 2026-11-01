@@ -11,8 +11,7 @@ import plugin, {
 	waitingKind
 } from '../wheelhouse/server/index.js';
 import { lines, windowStart } from '../wheelhouse/ui/digest.js';
-
-const now = Date.parse('2026-10-31T09:00:00Z');
+import { NOW as now } from './now.js';
 const projects = [
 	{ id: 'atlas', name: 'Atlas', description: null, path: null },
 	{ id: 'lumen', name: 'Lumen', description: null, path: null }
