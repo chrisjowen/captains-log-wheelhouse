@@ -15,7 +15,7 @@
 		"enabledByDefault": false,
 		"contributions": [
 			{ "id": "digest", "slot": "home.card" },
-			{ "id": "log", "slot": "nav.page" }
+			{ "id": "log", "slot": "nav.page", "icon": "wheelhouse/icon.svg" }
 		],
 		"services": [],
 		"settings": {
