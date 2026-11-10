@@ -213,7 +213,7 @@ describe('the plugin', () => {
 
 	it('contributes exactly what its manifest declares', () => {
 		expect(plugin.contributions.map((c) => ({ id: c.id, slot: c.slot }))).toEqual(
-			manifest.wheelhouse.contributions
+			manifest.wheelhouse.contributions.map((c) => ({ id: c.id, slot: c.slot }))
 		);
 		expect(plugin.services ?? []).toEqual(manifest.wheelhouse.services);
 	});
